@@ -4,6 +4,7 @@
 
 import numpy as np
 from scipy import optimize as opt
+from scipy import integrate as intgrt
 from matplotlib import pyplot as plt 
 import time 
 
@@ -174,28 +175,118 @@ class simulation:
 		m2 = self.vectors[9:12]
 		
 		return m1,m2
+		
+		
+	#################################
+	### Now we implement dyanmics ###	
+	#################################
+	
+	### This will set the time parameters of the dynamics
+	### Pass an array of time points
+	def set_dynamics_times(self,times):
+		self.times = times
+		self.t0 = self.times[0]
+		self.tf = self.times[-1]
+		self.ntimes = len(self.times)
+		
+		### We also set an array for the state vectors at each time point, which may be quite large 
+		self.vector_dynamics = np.zeros((18,self.ntimes))
+	
+	### This function will be the analytical expression of the magnetic field as a function of time 
+	### We will pass a reference to a function 
+	def set_dynamics_hext(self,f):
+		self.hext_t = f
+		
+		
+	### Now we construct the equations of motion function 
+	def eom_function(self,t,X):
+		dXdt = np.zeros(18)
+		
+		lvec = np.zeros((2,3)) ### This will be the angular momentum on each sublattice
+		qtensor = np.zeros((2,3,3)) ### This will be the angular momentum nematic tensor on each sublattice
+		spin = np.zeros((2,3)) ### This is the spin on each sublattice, used for the spin parity operator 
+		
+		for i in range(2):
+			s = X[9*i:(9*i +3)]
+			u = X[(9*i+3):(9*i+6)]
+			v = X[(9*i+6):(9*i+9)]
+			
+			
+			
+			
+			### SOC and CF external field terms are a bit simpler and we do them first for each sublattice
+			### SPIN EOM
+			dXdt[9*i:(9*i +3)] += np.cross( 2.*self.soc*np.cross(u,v) , s)
+			
+			### We first calculate the instantaneous external field 
+			h_t = self.hext_t(t)
+			dXdt[9*i:(9*i +3)] += np.cross( 2.*self.soc*np.cross(u,v) - h_t , s)
+			
+			### U and V EOM
+			dXdt[(9*i+3):(9*i+6)] +=  self.cf[i]@ v + self.soc*np.cross(s,u)
+			dXdt[(9*i+6):(9*i+9)] += -self.cf[i]@ u + self.soc*np.cross(s,v)
+			
+			### Now we must do the KK terms which are more complicated 
+			### We will need the following temrs for this 
+			lvec[i,:] = 2.*np.cross(u,v)
+			qtensor[i,:,:] = np.eye(3) - np.outer(u,u) - np.outer(v,v)
+			spin[i,:] = s
+			
+		jeff = self.J0 + self.J1 * lvec[0,:]@lvec[1,:] + self.J2 * np.trace(qtensor[0,...]@qtensor[1,...])
+		spin_parity = spin[0,:]@spin[1,:] + 0.25
+		
+		for j in range(2):
+			### SPIN EOM due to KK
+			dXdt[9*i:(9*i +3)] += jeff*np.cross( spin[j-1,:], spin[j]) ### This will be S[other SL] x S[this SL] for both j = 0 and 1 
+			
+			### U and V EOM
+			xieff = (spin_parity*self.J1 + 0.5*self.K1 )*lvec[j-1,:]
+			heff = (spin_parity*self.J1 + 0.5*self.K1 )*qtensor[j-1,:,:]
+			
+			dXdt[(9*i+3):(9*i+6)] +=  heff @ v + np.cross(xieff,u)
+			dXdt[(9*i+6):(9*i+9)] += -heff @ u + np.cross(xieff,v)
+			
+			
+		### We have finished constructing the EOM function
+		return dXdt
+		
+		
+		
+	### This function will solve the equations of motion starting from the ground state and store the simulation output in the correct variables
+	def run_dynamics(self):
+		sol = intgrt.solve_ivp( self.eom_function,(self.t0,self.tf),self.vectors,t_eval = self.times)
+		self.vector_dynamics = sol.y
+		
+		
+	
+	
+	
+	
 
 def main():
 	J0 = 6.*10. ### We use meV and include coordination number here which, for cubic lattice is z = 6 
 	eta = 0.1
-	socs = np.linspace(0.,10.,20)
+	soc = 10.
 
 	cf = [ np.diag([20.,0.,-20.]), - np.diag([20.,0.,-20.]) ]
 	
 	hext = np.array([0.,0.,0.01])
+	
+	times = np.linspace(0.,100.,100)
+	hext_dynamics = lambda t : 10.*np.cos(0.4*J0*t)*np.exp(-(t -20.)**2/5.) *np.array([1.,0.,0.])
 
+	t0 = time.time()
 	sim = simulation(J0,eta,0.,cf,hext)
-	magzs = np.zeros_like(socs)
-
-	for i in range(len(socs)):
-		soc = socs[i]
-		simulation.soc = soc
-		sim.find_GS()
-		m1,m2 = sim.get_magnetic_state()
-		magzs[i] = m1[2]
-		
-	plt.plot(socs,magzs)
-	plt.show()
+	
+	sim.find_GS()
+	
+	sim.set_dynamics_times(times)
+	sim.set_dynamics_hext(hext_dynamics)
+	
+	sim.run_dynamics()
+	t1 = time.time()
+	
+	print("total time: ",t1-t0,"s")
 	
 
 if __name__ == "__main__":
