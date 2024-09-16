@@ -85,7 +85,7 @@ class simulation:
 		return np.concatenate([vectors_sl[0,:],vectors_sl[1,:]])
 
 	### Initialize method
-	def __init__(self,J0,eta,soc,cf):
+	def __init__(self,J0,eta,soc,cf,hext):
 		### Default will be to initialize to random angles 
 		angls = simulation.random_angles()
 		self.vectors = simulation.angles_to_vector(angls)
@@ -112,6 +112,9 @@ class simulation:
 
 		self.soc = soc
 		self.cf = cf ### This should have shape of (2,3,3) and is the CF matrix on each site
+		
+		### External magnetic field 
+		self.hext = hext
 
 		self.energy = self.calc_energy(angls)
 
@@ -127,13 +130,14 @@ class simulation:
 
 			e += self.soc*2.*s@np.cross(u,v) 
 			e += u@self.cf[i]@u + v@self.cf[i]@v
+			
+			e += -self.hext@s
 
 		spin_parity = vec[:3]@vec[9:12] + 0.25 
 
 		L_sl = 2.*np.array([ np.cross(vec[3:6],vec[6:9]), np.cross(vec[12:15],vec[15:18])]) 
 		l1l2 = L_sl[0]@L_sl[1] ### Angular momentum overlap
 
-		### DOUBLE CHECK THESE FORMULAE
 		Q_sl = [ np.outer(vec[3:6],vec[3:6]) +np.outer(vec[6:9],vec[6:9]) , np.outer(vec[12:15],vec[12:15]) +np.outer(vec[15:18],vec[15:18])  ]
 		q1q2 = np.trace( Q_sl[0]@Q_sl[1])  ### Orbital polarization overlap
 
@@ -150,25 +154,49 @@ class simulation:
 	### It will save the new state over the old one and update the energy 
 	def find_GS(self):
 		a0 = simulation.random_angles()
-		f = lambda a: self.calc_energy(simulation.angles_to_vector(a))
-		sol = opt.basinhopping(f,a0)
+		f = lambda a: self.calc_energy(a)
+		
+		### We should tweak the basin hopping temperature a bit to make sure we don't get stuck in a metastable state
+		### We will take it to be about comparable to 70% of J0 
+		temp = 0.7 * self.J0
+		
+		sol = opt.basinhopping(f,a0,T = temp)
 
 		### Now we extract the set of angles and the energy 
 		angles = sol.x 
-		self.vec = simulation.angles_to_vector(angles)
+		self.vectors = simulation.angles_to_vector(angles)
 		self.energy = sol.fun 
+		
+		
+	### This method returns the magnetization on each sublattice 
+	def get_magnetic_state(self):
+		m1 = self.vectors[0:3]
+		m2 = self.vectors[9:12]
+		
+		return m1,m2
 
 def main():
-	J0 = 10. ### We use meV 
+	J0 = 6.*10. ### We use meV and include coordination number here which, for cubic lattice is z = 6 
 	eta = 0.1
-	soc = 10.
+	socs = np.linspace(0.,10.,20)
 
-	cf = [ np.diag([10.,0.,-10.]), - np.diag([10.,0.,-10.]) ]
+	cf = [ np.diag([20.,0.,-20.]), - np.diag([20.,0.,-20.]) ]
+	
+	hext = np.array([0.,0.,0.01])
 
-	sim = simulation(J0,eta,soc,cf)
-	print(sim.energy)
-	sim.find_GS()
-	print(sim.energy)
+	sim = simulation(J0,eta,0.,cf,hext)
+	magzs = np.zeros_like(socs)
+
+	for i in range(len(socs)):
+		soc = socs[i]
+		simulation.soc = soc
+		sim.find_GS()
+		m1,m2 = sim.get_magnetic_state()
+		magzs[i] = m1[2]
+		
+	plt.plot(socs,magzs)
+	plt.show()
+	
 
 if __name__ == "__main__":
 	main()
