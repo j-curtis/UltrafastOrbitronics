@@ -24,7 +24,7 @@ class simulation:
 		angles = np.zeros((2,6))
 
 		for i in range(2):
-			phi = np.random.ranf()*np.pi
+			phi = np.random.ranf()*2.*np.pi
 			theta = np.arccos(2.*np.random.ranf()-1.) ### We take the arccos of a random value in [-1.1] -- this generates a random distribution on sphere 
 
 			beta = phi = np.random.ranf()*np.pi
@@ -86,30 +86,17 @@ class simulation:
 		return np.concatenate([vectors_sl[0,:],vectors_sl[1,:]])
 
 	### Initialize method
-	def __init__(self,J0,eta,soc,cf,hext):
+	def __init__(self,J0,J1,J2,K1,K2,soc,cf,hext):
 		### Default will be to initialize to random angles 
 		angls = simulation.random_angles()
 		self.vectors = simulation.angles_to_vector(angls)
 
 		self.J0 = J0
-		self.eta = eta 
+		self.J1 = J1
+		self.J2 = J2
 
-		### We now compute the s,p,d channel exchanges based on these values using the static function 
-		self.JS = self.J0/(1.+2.*self.eta)
-		self.JP = self.J0/(1.-3.*self.eta)
-		self.JD = self.J0/(1.-self.eta)
-
-		### And we further compute the J and K interactions in the symmetric and antisymmetric channels
-		self.J0 = (self.JD -self.JS)/3. - self.JP
-		self.J1 = (self.JD + self.JP)/2.
-		self.J2 = self.JD/6. + self.JS/3. + self.JP/2.
-
-		self.J1 = self.J1 - self.J2/2.
-
-		self.K1 = self.JP/2. - self.JD/2. 
-		self.K2 = -self.JD/6. - self.JS/3. +self.JP/2.
-
-		self.K1 = self.K1 - self.K2/2.
+		self.K1 = K1
+		self.K2 = K2
 
 		self.soc = soc
 		self.cf = cf ### This should have shape of (2,3,3) and is the CF matrix on each site
@@ -159,7 +146,7 @@ class simulation:
 		
 		### We should tweak the basin hopping temperature a bit to make sure we don't get stuck in a metastable state
 		### We will take it to be about comparable to 70% of J0 
-		temp = 0.7 * self.J0
+		temp = 0.2 * self.J0
 		
 		sol = opt.basinhopping(f,a0,T = temp)
 
@@ -216,9 +203,6 @@ class simulation:
 			
 			### SOC and CF external field terms are a bit simpler and we do them first for each sublattice
 			### SPIN EOM
-			dXdt[9*i:(9*i +3)] += np.cross( 2.*self.soc*np.cross(u,v) , s)
-			
-			### We first calculate the instantaneous external field 
 			h_t = self.hext_t(t)
 			dXdt[9*i:(9*i +3)] += np.cross( 2.*self.soc*np.cross(u,v) - h_t , s)
 			
@@ -257,28 +241,26 @@ class simulation:
 		sol = intgrt.solve_ivp( self.eom_function,(self.t0,self.tf),self.vectors,t_eval = self.times)
 		self.vector_dynamics = sol.y
 		
-		
-	
-	
-	
-	
 
 def main():
-	J0 = 6.*10. ### We use meV and include coordination number here which, for cubic lattice is z = 6 
-	eta = 0.1
-	soc = 10.
-
-	cf = [ np.diag([20.,0.,-20.]), - np.diag([20.,0.,-20.]) ]
+	J0 = -1.
+	J1 = 0.
+	J2 = 0.
+	K1 = 0.
+	K2 = 0.
+	soc = 0.
+	cf = [ np.diag([0.4,0.,-0.4]), - np.diag([0.4,0.,-0.4]) ]
 	
 	hext = np.array([0.,0.,0.01])
 	
-	times = np.linspace(0.,100.,100)
-	hext_dynamics = lambda t : 10.*np.cos(0.4*J0*t)*np.exp(-(t -20.)**2/5.) *np.array([1.,0.,0.])
+	times = np.linspace(0.,100.,1000)
+	hext_dynamics = lambda t : np.array([0.,0.,0.])
 
 	t0 = time.time()
-	sim = simulation(J0,eta,0.,cf,hext)
+	sim = simulation(J0,J1,J2,K1,K2,soc,cf,hext)
 	
 	sim.find_GS()
+	print(sim.vectors)
 	
 	sim.set_dynamics_times(times)
 	sim.set_dynamics_hext(hext_dynamics)
@@ -288,6 +270,10 @@ def main():
 	
 	print("total time: ",t1-t0,"s")
 	
+	for i in range(18):
+		plt.plot(sim.times,sim.vector_dynamics[i,:])
+	plt.show()
+
 
 if __name__ == "__main__":
 	main()
