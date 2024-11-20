@@ -146,7 +146,7 @@ class simulation:
 		
 		### We should tweak the basin hopping temperature a bit to make sure we don't get stuck in a metastable state
 		### We will take it to be about comparable to 70% of J0 
-		temp = 0.2 * self.J0
+		temp = 0.1 * np.abs(self.J0)
 		
 		sol = opt.basinhopping(f,a0,T = temp)
 
@@ -154,16 +154,27 @@ class simulation:
 		angles = sol.x 
 		self.vectors = simulation.angles_to_vector(angles)
 		self.energy = sol.fun 
-		
-		
+				
 	### This method returns the magnetization on each sublattice 
-	def get_magnetic_state(self):
+	def get_spin_mag(self):
 		m1 = self.vectors[0:3]
 		m2 = self.vectors[9:12]
 		
 		return m1,m2
+
+	### This method returns the orbital magnetization on each sublattice 
+	def get_orbital_mag(self):
+		u1 = self.vectors[3:6]
+		v1 = self.vectors[6:9]
+		u2 = self.vectors[12:15]
+		v2 = self.vectors[15:18]
+
+		l1 = 2.*np.cross(u1,v1)
+		l2 = 2.*np.cross(u2,v2)
 		
+		return l1,l2
 		
+	
 	#################################
 	### Now we implement dyanmics ###	
 	#################################
@@ -184,7 +195,6 @@ class simulation:
 	def set_dynamics_hext(self,f):
 		self.hext_t = f
 		
-		
 	### Now we construct the equations of motion function 
 	def eom_function(self,t,X):
 		dXdt = np.zeros(18)
@@ -193,86 +203,145 @@ class simulation:
 		qtensor = np.zeros((2,3,3)) ### This will be the angular momentum nematic tensor on each sublattice
 		spin = np.zeros((2,3)) ### This is the spin on each sublattice, used for the spin parity operator 
 		
+		### Unpack all variables
 		for i in range(2):
 			s = X[9*i:(9*i +3)]
 			u = X[(9*i+3):(9*i+6)]
 			v = X[(9*i+6):(9*i+9)]
 			
-			
-			
-			
-			### SOC and CF external field terms are a bit simpler and we do them first for each sublattice
-			### SPIN EOM
-			h_t = self.hext_t(t)
-			dXdt[9*i:(9*i +3)] += np.cross( 2.*self.soc*np.cross(u,v) - h_t , s)
-			
-			### U and V EOM
-			dXdt[(9*i+3):(9*i+6)] +=  self.cf[i]@ v + self.soc*np.cross(s,u)
-			dXdt[(9*i+6):(9*i+9)] += -self.cf[i]@ u + self.soc*np.cross(s,v)
-			
-			### Now we must do the KK terms which are more complicated 
-			### We will need the following temrs for this 
 			lvec[i,:] = 2.*np.cross(u,v)
-			qtensor[i,:,:] = np.eye(3) - np.outer(u,u) - np.outer(v,v)
+			qtensor[i,:,:] = np.outer(u,u) + np.outer(v,v)
 			spin[i,:] = s
-			
-		jeff = self.J0 + self.J1 * lvec[0,:]@lvec[1,:] + self.J2 * np.trace(qtensor[0,...]@qtensor[1,...])
-		spin_parity = spin[0,:]@spin[1,:] + 0.25
-		
-		for j in range(2):
-			### SPIN EOM due to KK
-			dXdt[9*i:(9*i +3)] += jeff*np.cross( spin[j-1,:], spin[j]) ### This will be S[other SL] x S[this SL] for both j = 0 and 1 
+
+		for i in range(2):
+			### CF terms in EOM
+			dXdt[(9*i+3):(9*i+6)] += self.cf[i]@X[(9*i+6):(9*i+9)]
+			dXdt[(9*i+6):(9*i+9)] += -self.cf[i]@X[(9*i+3):(9*i+6)]
+
+			### SOC terms in EOM
+			dXdt[9*i:(9*i +3)] += self.soc*np.cross(lvec[i,:],spin[i,:])
+			dXdt[(9*i+3):(9*i+6)] += self.soc*np.cross(spin[i,:],X[(9*i+3):(9*i+6)] )
+			dXdt[(9*i+6):(9*i+9)] += self.soc*np.cross(spin[i,:],X[(9*i+6):(9*i+9)] )
+
+
+			### external field in EOM
+			h_t = self.hext + self.hext_t(t)
+			dXdt[9*i:(9*i +3)] += np.cross(-h_t,spin[i,:])
+
+			### KK terms in EOM
+			jeff = self.J0 + self.J1 * lvec[0,:]@lvec[1,:] + self.J2 *(1. +  np.trace(qtensor[0,...]@qtensor[1,...]) )
+			dXdt[9*i:(9*i +3)] += jeff*np.cross(spin[i-1,:],spin[i,:])
+
+
+			spin_parity = spin[0,:]@spin[1,:] + 0.25
 			
 			### U and V EOM
-			xieff = (spin_parity*self.J1 + 0.5*self.K1 )*lvec[j-1,:]
-			heff = (spin_parity*self.J1 + 0.5*self.K1 )*qtensor[j-1,:,:]
+			xieff = (spin_parity*self.J1 + 0.5*self.K1 )*lvec[i-1,:]
+			heff = (spin_parity*self.J2 + 0.5*self.K2 )*( np.eye(3) - qtensor[i-1,:,:] )
 			
-			dXdt[(9*i+3):(9*i+6)] +=  heff @ v + np.cross(xieff,u)
-			dXdt[(9*i+6):(9*i+9)] += -heff @ u + np.cross(xieff,v)
+			dXdt[(9*i+3):(9*i+6)] +=  heff @ X[(9*i+6):(9*i+9)] + np.cross(xieff,X[(9*i+3):(9*i+6)])
+			dXdt[(9*i+6):(9*i+9)] += -heff @ X[(9*i+3):(9*i+6)] + np.cross(xieff,X[(9*i+6):(9*i+9)])
 			
 			
 		### We have finished constructing the EOM function
 		return dXdt
-		
-		
 		
 	### This function will solve the equations of motion starting from the ground state and store the simulation output in the correct variables
 	def run_dynamics(self):
 		sol = intgrt.solve_ivp( self.eom_function,(self.t0,self.tf),self.vectors,t_eval = self.times)
 		self.vector_dynamics = sol.y
 		
+	### This method returns the magnetization dynamics
+	def get_spin_mag_t(self):
+		m1 = self.vector_dynamics[0:3,:]
+		m2 = self.vector_dynamics[9:12,:]
+		
+		return m1,m2
+
+	### This method returns the orbital magnetization on each sublattice 
+	def get_orbital_mag_t(self):
+		u1 = self.vector_dynamics[3:6,:]
+		v1 = self.vector_dynamics[6:9,:]
+		u2 = self.vector_dynamics[12:15,:]
+		v2 = self.vector_dynamics[15:18,:]
+
+		l1 = 2.*np.cross(u1,v1,axis=0)
+		l2 = 2.*np.cross(u2,v2,axis=0)
+		
+		return l1,l2
+
+	### This method returns the orbital quadrupolar tensors
+	def get_orbital_quad_t(self):
+		u1 = self.vector_dynamics[3:6,:]
+		v1 = self.vector_dynamics[6:9,:]
+		u2 = self.vector_dynamics[12:15,:]
+		v2 = self.vector_dynamics[15:18,:]
+
+		q1 = np.zeros((3,3,self.ntimes))
+		q2 = np.zeros((3,3,self.ntimes))
+
+		for i in range(3):
+			for j in range(3):
+				q1[i,j,:] = u1[i,:]*u1[j,:] + v1[i,:]*v1[j,:]
+				q2[i,j,:] = u2[i,:]*u2[j,:] + v2[i,:]*v2[j,:]
+		
+		return q1,q2
+		
 
 def main():
 	J0 = -1.
-	J1 = 0.
-	J2 = 0.
-	K1 = 0.
-	K2 = 0.
-	soc = 0.
-	cf = [ np.diag([0.4,0.,-0.4]), - np.diag([0.4,0.,-0.4]) ]
-	
-	hext = np.array([0.,0.,0.01])
-	
-	times = np.linspace(0.,100.,1000)
-	hext_dynamics = lambda t : np.array([0.,0.,0.])
+	J1 = -.3
+	J2 = 0.23
+	K1 = 0.3
+	K2 = 0.9
+	soc = 0.6
+
+	cf = [ np.diag([0.3,0.,-0.3]), - np.diag([0.3,0.,-0.3])]
+
+	hext = np.array([0.,0.,0.05])
 
 	t0 = time.time()
-	sim = simulation(J0,J1,J2,K1,K2,soc,cf,hext)
 	
+	sim = simulation(J0,J1,J2,K1,K2,soc,cf,hext)
 	sim.find_GS()
-	print(sim.vectors)
+	print(sim.J0)
+
+	times = np.linspace(0.,100.,300)
+	hext_dynamics = lambda t : np.array([0.,0.,0.])
 	
 	sim.set_dynamics_times(times)
 	sim.set_dynamics_hext(hext_dynamics)
-	
 	sim.run_dynamics()
+	
+	m1,m2 = sim.get_spin_mag_t()
+
+	for i in range(3):
+		plt.plot(sim.times,m1[i,:])
+		plt.show()
+		plt.plot(sim.times,m2[i,:])
+		plt.show()
+	
+	l1,l2 = sim.get_orbital_mag_t()
+
+	for i in range(3):
+		plt.plot(sim.times,l1[i,:])
+		plt.show()
+		plt.plot(sim.times,l2[i,:])
+		plt.show()
+
+	q1,q2 = sim.get_orbital_quad_t()
+
+	for i in range(3):
+		for j in range(3):
+			plt.plot(sim.times,q1[i,j,:])
+			plt.show()
+			plt.plot(sim.times,q2[i,j,:])
+			plt.show()
+
 	t1 = time.time()
-	
 	print("total time: ",t1-t0,"s")
-	
-	for i in range(18):
-		plt.plot(sim.times,sim.vector_dynamics[i,:])
-	plt.show()
+
+
 
 
 if __name__ == "__main__":
