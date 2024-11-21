@@ -126,14 +126,16 @@ class simulation:
 		L_sl = 2.*np.array([ np.cross(vec[3:6],vec[6:9]), np.cross(vec[12:15],vec[15:18])]) 
 		l1l2 = L_sl[0]@L_sl[1] ### Angular momentum overlap
 
-		Q_sl = [ np.outer(vec[3:6],vec[3:6]) +np.outer(vec[6:9],vec[6:9]) , np.outer(vec[12:15],vec[12:15]) +np.outer(vec[15:18],vec[15:18])  ]
-		q1q2 = np.trace( Q_sl[0]@Q_sl[1])  ### Orbital polarization overlap
+		#Q_sl = [ np.outer(vec[3:6],vec[3:6]) +np.outer(vec[6:9],vec[6:9]) , np.outer(vec[12:15],vec[12:15]) +np.outer(vec[15:18],vec[15:18])  ]
+		#q1q2 = np.trace( Q_sl[0]@Q_sl[1])  ### Orbital polarization overlap
 
 		### These are all twice the super exchange energy because they should be counted once for each sublattice in the system (not including z factor)
-		se_j_energy = spin_parity*( self.J0 + self.J1*l1l2 + self.J2 *( 1. + q1q2) )
-		se_k_energy = 0.5*( self.K1*l1l2 + self.K2*(1.+q1q2) )
+		#se_j_energy = spin_parity*( self.J0 + self.J1*l1l2 + self.J2 *( 1. + q1q2) )
+		#se_k_energy = 0.5*( self.K1*l1l2 + self.K2*(1.+q1q2) )
 
-		e += se_j_energy + se_k_energy
+		#e += se_j_energy + se_k_energy
+		e += (self.J0+ self.J1 * l1l2) * spin_parity 
+		e += self.K1 *l1l2/2.
 
 		return e
 
@@ -229,7 +231,8 @@ class simulation:
 			dXdt[9*i:(9*i +3)] += np.cross(-h_t,spin[i,:])
 
 			### KK terms in EOM
-			jeff = self.J0 + self.J1 * lvec[0,:]@lvec[1,:] + self.J2 *(1. +  np.trace(qtensor[0,...]@qtensor[1,...]) )
+			#jeff = self.J0 + self.J1 * lvec[0,:]@lvec[1,:] + self.J2 *(1. +  np.trace(qtensor[0,...]@qtensor[1,...]) )
+			jeff = self.J0 + self.J1 * lvec[0,:]@lvec[1,:]
 			dXdt[9*i:(9*i +3)] += jeff*np.cross(spin[i-1,:],spin[i,:])
 
 
@@ -237,10 +240,10 @@ class simulation:
 			
 			### U and V EOM
 			xieff = (spin_parity*self.J1 + 0.5*self.K1 )*lvec[i-1,:]
-			heff = (spin_parity*self.J2 + 0.5*self.K2 )*( np.eye(3) - qtensor[i-1,:,:] )
+			#heff = (spin_parity*self.J2 + 0.5*self.K2 )*( np.eye(3) - qtensor[i-1,:,:] )
 			
-			dXdt[(9*i+3):(9*i+6)] +=  heff @ X[(9*i+6):(9*i+9)] + np.cross(xieff,X[(9*i+3):(9*i+6)])
-			dXdt[(9*i+6):(9*i+9)] += -heff @ X[(9*i+3):(9*i+6)] + np.cross(xieff,X[(9*i+6):(9*i+9)])
+			dXdt[(9*i+3):(9*i+6)] +=  np.cross(xieff,X[(9*i+3):(9*i+6)]) #+ heff @ X[(9*i+6):(9*i+9)] 
+			dXdt[(9*i+6):(9*i+9)] +=  np.cross(xieff,X[(9*i+6):(9*i+9)]) # -heff @ X[(9*i+3):(9*i+6)] 
 			
 			
 		### We have finished constructing the EOM function
@@ -294,9 +297,9 @@ def main():
 	J2 = 0.23
 	K1 = 0.3
 	K2 = 0.9
-	soc = 0.6
+	soc = 0.3
 
-	cf = [ np.diag([0.3,0.,-0.3]), - np.diag([0.3,0.,-0.3])]
+	cf = [ np.diag([2.,0.,-2.]), - np.diag([2.,0.,-2.])]
 
 	hext = np.array([0.,0.,0.05])
 
@@ -304,7 +307,6 @@ def main():
 	
 	sim = simulation(J0,J1,J2,K1,K2,soc,cf,hext)
 	sim.find_GS()
-	print(sim.J0)
 
 	times = np.linspace(0.,100.,300)
 	hext_dynamics = lambda t : np.array([0.,0.,0.])
